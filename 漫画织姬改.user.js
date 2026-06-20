@@ -8,7 +8,7 @@
 // @name:es            Comic Loomette
 // @name:ka            Comic Loomette
 // @namespace          local-fork.comic-loomette
-// @version            4.14.10.lowmem.2
+// @version            4.14.10.lowmem.3
 // @author             MapoMagpie (fork)
 // @description        Local fork of Comic Looms with Low Memory mode. No auto-update.
 // @description:en     Local fork of Comic Looms with Low Memory mode. No auto-update.
@@ -2832,12 +2832,25 @@ async restoreChapter(index) {
       this.chapterIndex = index;
       const chapter = this.chapters[this.chapterIndex];
       this.queue.restore(index, chapter.filteredQueue);
+      if (chapter.queue.length === 0 && (chapter.done || !chapter.sourceIter)) {
+        chapter.done = false;
+        chapter.sourceIter = this.matcher.fetchPagesSource(chapter);
+      }
       if (!chapter.sourceIter) {
         evLog("error", "chapter sourceIter is not set!");
         return;
       }
       if (chapter.queue.length === 0) {
-        await this.appendNextPage();
+        for (let tries = 0; tries < 100; tries++) {
+          if (this.chapterIndex !== index) return;
+          if (this.appendPageLock) {
+            await sleep(20);
+            continue;
+          }
+          const ok = await this.appendNextPage();
+          if (ok || chapter.done || chapter.queue.length > 0) break;
+          await sleep(20);
+        }
         this.appendPages(this.queue.length);
       } else if (!chapter.done) {
         this.appendPages(this.queue.length);
@@ -2988,7 +3001,6 @@ async appendImages(pageSource, chapterIndex) {
             this.appendPageLock = false;
           }
           if (next.value?.error) {
-            chapter.done = true;
             break;
           }
           if (next.value?.value) {
