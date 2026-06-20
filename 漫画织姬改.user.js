@@ -14779,10 +14779,21 @@ intersectingIndexLock = false;
       EBUS.subscribe("pf-on-appended", (_total, nodes, chapterIndex) => {
         if (chapterIndex !== this.chapterIndex) return;
         this.append(nodes);
+        if (this._pendingChapterShow && nodes && nodes.length > 0) {
+          this._pendingChapterShow = false;
+          const first = nodes.reduce((a, b) => b.index < a.index ? b : a, nodes[0]);
+          this.setNow(first);
+        }
       });
       EBUS.subscribe("pf-change-chapter", (index) => {
         this.chapterIndex = Math.max(0, index);
         this.container.innerHTML = "";
+        this.intersectingElements = [];
+        this.renderingElements = [];
+        this.intersectingIndexLock = false;
+        this.currentIndex = 0;
+        this.currLoadingState.clear();
+        this._pendingChapterShow = this.visible;
       });
       EBUS.subscribe("imf-on-click", (imf) => this.show(imf));
       EBUS.subscribe("imf-on-finished", (index, success, imf) => {
@@ -14908,7 +14919,9 @@ intersectingIndexLock = false;
       if (!queue || queue.length === 0) return;
       const keep = Math.max(2, ADAPTER.conf.lowMemoryKeepPages || 30);
       const center = this.currentIndex;
+      const visible = new Set(this.intersectingElements.map((e) => parseIndex(e)));
       for (let i = 1; i < queue.length; i++) {
+        if (visible.has(i)) continue;
         if (Math.abs(i - center) > keep) {
           queue[i]?.releaseMemory?.(true);
         }
