@@ -8,7 +8,7 @@
 // @name:es            Comic Loomette
 // @name:ka            Comic Loomette
 // @namespace          local-fork.comic-loomette
-// @version            4.14.10.lowmem.1
+// @version            4.14.10.lowmem.2
 // @author             MapoMagpie (fork)
 // @description        Local fork of Comic Looms with Low Memory mode. No auto-update.
 // @description:en     Local fork of Comic Looms with Low Memory mode. No auto-update.
@@ -2718,7 +2718,7 @@ queue;
       const debouncer = new Debouncer();
       EBUS.subscribe("ifq-on-finished-report", (index) => debouncer.addEvent("APPEND-NEXT-PAGES", () => this.appendPages(index), 5));
       EBUS.subscribe("ifq-on-finished-report", () => debouncer.addEvent("PREFETCH-NEXT-CHAPTER", () => {
-        if (ADAPTER.conf.prefetchNextChapter && this.queue.isFinished?.()) this.prefetchNextChapter();
+        if (ADAPTER.conf.prefetchNextChapter && this.chapters[this.chapterIndex]?.done) this.prefetchNextChapter();
       }, 500));
       EBUS.subscribe("imf-on-finished", (index, success, imf) => {
         if (index === 0 && success) {
@@ -2837,11 +2837,9 @@ async restoreChapter(index) {
         return;
       }
       if (chapter.queue.length === 0) {
-        const first = await chapter.sourceIter.next();
-        if (first.value) {
-          if (first.value.error) throw first.value.error;
-          await this.appendImages(first.value.value, this.chapterIndex);
-        }
+        await this.appendNextPage();
+        this.appendPages(this.queue.length);
+      } else if (!chapter.done) {
         this.appendPages(this.queue.length);
       }
     }
@@ -2971,12 +2969,24 @@ async appendImages(pageSource, chapterIndex) {
       if (nextIndex >= this.chapters.length) return;
       const chapter = this.chapters[nextIndex];
       if (chapter.prefetching) return;
+      const aborted = () => !ADAPTER.conf.prefetchNextChapter || this.chapterIndex !== baseIndex || this.queue.downloading?.();
+      const limit = ADAPTER.conf.lowMemoryMode ? Math.max(2, ADAPTER.conf.lowMemoryKeepPages || 30) : Infinity;
       chapter.prefetching = true;
       try {
-        while (!chapter.done) {
-          if (!ADAPTER.conf.prefetchNextChapter || this.chapterIndex !== baseIndex || this.queue.downloading?.()) return;
+        while (!chapter.done && chapter.queue.length < limit) {
+          if (aborted()) return;
           if (!chapter.sourceIter) break;
-          const next = await chapter.sourceIter.next();
+          while (this.appendPageLock) {
+            await sleep(30);
+            if (aborted()) return;
+          }
+          this.appendPageLock = true;
+          let next;
+          try {
+            next = await chapter.sourceIter.next();
+          } finally {
+            this.appendPageLock = false;
+          }
           if (next.value?.error) {
             chapter.done = true;
             break;
@@ -2989,12 +2999,12 @@ async appendImages(pageSource, chapterIndex) {
             break;
           }
         }
+        const imfs = limit === Infinity ? chapter.queue.slice() : chapter.queue.slice(0, limit);
         const concurrency = Math.max(1, ADAPTER.conf.downloadThreads || 2);
         let cursor = 0;
-        const imfs = chapter.queue.slice();
         const worker = async () => {
           while (cursor < imfs.length) {
-            if (!ADAPTER.conf.prefetchNextChapter || this.chapterIndex !== baseIndex || this.queue.downloading?.()) return;
+            if (aborted()) return;
             const imf = imfs[cursor++];
             if (!imf || imf.stage === FetchState.DONE) continue;
             try {
