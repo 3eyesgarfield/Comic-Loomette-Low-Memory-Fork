@@ -1,0 +1,15 @@
+# Personal / unrelated files — do not publish
+*.torrent
+
+# Local source dumps (kept out of the published fork)
+Comic Looms-*.txt
+漫画织姬改-*.txt
+
+# Local tooling / editor config
+.claude/
+.vscode/
+.idea/
+
+# OS cruft
+Thumbs.db
+.DS_Store
